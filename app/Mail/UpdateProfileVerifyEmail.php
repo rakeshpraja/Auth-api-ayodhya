@@ -29,7 +29,7 @@ class UpdateProfileVerifyEmail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Update Profile Verify Email',
+            subject: 'Your OTP for Account Verification',
         );
     }
 
