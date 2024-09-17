@@ -18,7 +18,8 @@ Route::post('password_reset/', [AuthController::class, 'resetPassword']);
 
 Route::middleware('auth:api')->group(function () {
     Route::post('update_profile',[AuthController::class,'updateProfile']);
-    
+    Route::post('refresh_token',[AuthController::class,'refreshToken']);
+    Route::post('profile',[AuthController::class,'getProfile']);
     Route::post('update_profile_verify',[AuthController::class,'verifyUpdateProfile'])->name('update.profileverify');
     Route::post('logout',[AuthController::class,'logout']);
 });
