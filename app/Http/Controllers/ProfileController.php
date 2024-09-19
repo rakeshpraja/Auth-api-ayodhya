@@ -17,7 +17,7 @@ class ProfileController extends Controller
         $request->validate([
             'file' => 'required|mimes:jpg,jpeg,png,pdf|max:5242880',
         ], [
-            'file.required' => 'Please upload a file.',
+            'file.required' => 'file not selected.',
             'file.mimes' => 'Only JPG, JPEG, PNG, and PDF files are allowed.',
             'file.max' => 'File size cannot exceed 5MB.',
         ]);

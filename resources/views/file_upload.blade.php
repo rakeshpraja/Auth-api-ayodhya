@@ -75,24 +75,6 @@
         .submit-button:hover {
             background-color: #007bb5;
         }
-
-        #progress-wrapper {
-            margin-top: 20px;
-            width: 100%;
-            background-color: #f3f3f3;
-            border-radius: 20px;
-            overflow: hidden;
-        }
-
-        #progress-bar {
-            width: 0%;
-            height: 30px;
-            background-color: #4caf50;
-            text-align: center;
-            color: white;
-            line-height: 30px;
-            border-radius: 20px;
-        }
     </style>
 </head>
 
@@ -103,49 +85,68 @@
         <form id="fileUploadForm" enctype="multipart/form-data">
             <div class="file-input-wrapper mt-4">
                 <button class="file-button">Choose File</button>
-                <input type="file" id="file" name="file">
-                <div id="errros"></div>
+                <input type="file" id="file" class="form-control" name="file">
+                <div id="file-name"></div>
+                <div id="errros" style="color:red;"></div>
             </div>
             <br><br>
             <button type="submit" class="submit-button">Upload</button>
         </form>
-        <div id="progress-wrapper">
-            <div id="progress-bar">0%</div>
+        <div class="progress mt-3" style="display:none">
+            <div id="progress-bar" class="progress-bar progress-bar-striped bg-info progress-bar-animated" role="progressbar" style="width: 0%;" aria-valuenow="25" aria-valuemin="0" aria-valuemax="100"></div>
         </div>
+
+
     </div>
 
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
         $(document).ready(function() {
+
+            $('.file-button').on('click', function() {
+                $('#file').click();
+            });
+            $('#file').on('change', function() {
+                var fileName = $(this).val().split('\\').pop();
+                if (fileName) {
+                    $('#errros').text('');
+                    $('#file-name').text('Selected File: ' + fileName);
+
+                }
+            });
             $('#fileUploadForm').on('submit', function(e) {
                 e.preventDefault();
                 var formData = new FormData(this);
-
-                var fileInput = document.getElementById('file');
-                if (fileInput.files.length === 0) {
-
-                    $("#errros").append(`<span class="text-danger">Please select a file before uploading.</span>`)
-
-                } else {
-                    $("#errros").empty()
-                }
-
                 $.ajax({
                     url: '{{ route("file.upload") }}',
                     type: 'POST',
                     data: formData,
+                    processData: false,
+                    contentType: false,
                     headers: {
                         'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
                     },
-                    contentType: false,
-                    processData: false,
                     success: function(response) {
 
+                        $('.progress').show();
                         if (response.success) {
+                            $('#file-name').text('');
+                            $('#fileUploadForm')[0].reset();
 
-                            $('#progress-bar').css('width', '100%');
-                            $('#progress-bar').text('100%');
-                            $('#messege_type').append(`<div class="alert alert-success">${response.message}</div>`);
+
+                            let progress = 0;
+                            let interval = setInterval(function() {
+                                if (progress <= 100) {
+                                    updateProgressBar(progress);
+                                    progress++;
+                                } else {
+                                    clearInterval(interval);
+                                    $('#messege_type').append(
+                                        `<div class="alert alert-success">${response.message}</div>`
+                                    );
+                                }
+                            }, 20);
+
 
                             setTimeout(function() {
                                 window.location.reload();
@@ -155,12 +156,21 @@
                             $('#message').text('File upload failed');
                         }
                     },
-                    error: function() {
-                        $('#message').text('An error occurred during file upload');
+                    error: function(response) {
+
+                        console.log(response.responseJSON.errors.file[0]);
+
+                        $('#errros').text(response.responseJSON.errors.file[0]);
                     }
                 });
             });
+
         });
+
+        function updateProgressBar(value) {
+            $('#progress-bar').css('width', value + '%').attr('aria-valuenow', value);
+            $('#progress-bar').text(value + '%');
+        }
     </script>
 
 </body>
