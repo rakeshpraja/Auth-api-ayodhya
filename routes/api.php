@@ -8,7 +8,7 @@ use App\Http\Controllers\Api\AuthController;
 
 
 Route::post('register',[AuthController::class,'register']);
-Route::get('verify/{token}',[AuthController::class,'verify'])->name('verify.user');
+Route::post('register_verify',[AuthController::class,'verify'])->name('verify.user');
 
 Route::post('login',[AuthController::class,'login']);
 

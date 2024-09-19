@@ -8,7 +8,15 @@
 </head>
 <body>
     <h1>Reset Password</h1>
-    <p>Click the link below to reset your password:</p>
-    <a href="{{ url('password_reset?token=' . $token) }}">Reset Password</a>
+    <p>Hello,{{$user->user}}</p>
+    <p>We received a request to reset your password. Please use the following OTP (One Time Password) to reset your password:</p>
+    
+    <h2>Your OTP: {{ $otp }}</h2>
+    
+    <p>This OTP is valid for the next {{$expires_at}} minutes. If you did not request a password reset, please ignore this email.</p>
+    
+    <p>Thank you,</p>
+  
 </body>
+
 </html>

@@ -12,11 +12,14 @@ use Tymon\JWTAuth\Exceptions\JWTException;
 use Illuminate\Support\Facades\Auth;
 use App\Models\Otp;
 use App\Models\TempUser;
+use App\Models\LoginActivity;
 use Mail;
 use App\Mail\CustomEmail;
 use App\Mail\UpdateProfileVerifyEmail;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Password;
+use UAParser\Parser;
+use Jenssegers\Agent\Agent;
 
 use Illuminate\Support\Facades\DB;
 
@@ -28,7 +31,7 @@ class AuthController extends Controller
 
             $validator = Validator::make(request()->all(), [
                 'name' => 'required',
-                'email' => 'required|string|email|max:255|unique:users',
+                'email' => 'required|string|email|max:255',
                 'password' => 'required|string|min:8|confirmed',
             ], [
                 'name.required' => 'Please enter your name.',
@@ -37,7 +40,7 @@ class AuthController extends Controller
                 'email.string' => 'Email must be a valid string.',
                 'email.email' => 'Please enter a valid email address.',
                 'email.max' => 'Email cannot exceed 255 characters.',
-                'email.unique' => 'This email is already registered.',
+
 
                 'password.required' => 'A password is required.',
                 'password.string' => 'Password must be a valid string.',
@@ -51,23 +54,27 @@ class AuthController extends Controller
             }
 
 
-            $user = new User();
+            $user = new TempUser();
             $user->name = request()->name;
             $user->email = request()->email;
             $user->password = bcrypt(request()->password);
             $user->save();
 
+
             $details = [
-                "token" => rand(11111, 99999),
+                'expires_at' => 5,
+                "otp" => rand(1111, 9999),
                 'user' => $user,
             ];
 
-            Mail::to(request()->email)->send(new CustomEmail($details));
-
             Otp::create([
                 'user_id' => $user->id,
-                'token' => $details['token'],
+                'otp' => $details['otp'],
+                'expires_at' => Carbon::now()->addMinutes(5),
             ]);
+
+            Mail::to(request()->email)->send(new CustomEmail($details));
+
 
             return response()->json([
                 'success' => 'Your registration has been completed. Please check your email and verify your registration.',
@@ -105,6 +112,27 @@ class AuthController extends Controller
                 ], 401);
             }
 
+            $agent = new Agent();
+            $user = Auth::user();
+
+            $deviceType = $agent->isMobile() ? 'Mobile' : ($agent->isTablet() ? 'Tablet' : 'Desktop');
+            $browserName = $agent->browser() ?: 'Unknown Browser';
+            $browserVersion = $agent->version($browserName) ?: 'Unknown Version';
+            $operatingSystem = $agent->platform() ?: 'Unknown OS';
+            $osVersion = $agent->version($operatingSystem) ?: 'Unknown Version';
+            $deviceName = $agent->device() ?: 'Unknown Device';
+
+            LoginActivity::create([
+                'Device_Type' => $deviceType,
+                'Device_Name' => $deviceName,
+                'user_id' => $user->id,
+                'ip_address' => request()->ip(),
+                'operating_system' => $operatingSystem,
+                'browser_name' => $browserName,
+                'login_time' => Carbon::now(),
+            ]);
+
+
             return $this->createNewToken($token);
         } catch (\Exception $e) {
             return response()->json([
@@ -119,7 +147,7 @@ class AuthController extends Controller
         try {
             $validator = Validator::make(request()->all(), [
                 'name' => 'required',
-                'email' => 'required|string|email|max:255',
+                'email' => 'required|string|email|max:255|unique:users,email',
                 'phone_number' => 'required|numeric',
                 'pdf_file' => 'required|mimes:pdf|max:5242880',
                 'image' => 'required|image|mimes:jpeg,png,jpg|max:5242880',
@@ -130,6 +158,7 @@ class AuthController extends Controller
                 'email.string' => 'The email must be a valid string.',
                 'email.email' => 'Please enter a valid email address.',
                 'email.max' => 'Email cannot exceed 255 characters.',
+                'email.unique' => 'you have already registered with this email address.',
 
                 'phone_number.required' => 'Please enter your phone number.',
                 'phone_number.numeric' => 'The phone number must be a valid number.',
@@ -166,7 +195,7 @@ class AuthController extends Controller
                 $imageFile->storeAs('images', $imageFileName, 'public');
             }
 
-            $user = User::where('email', request()->email)->first();
+            $user = User::where('id', Auth::user()->id)->first();
 
             if (!$user) {
                 return response()->json([
@@ -193,7 +222,7 @@ class AuthController extends Controller
             Otp::create([
                 'user_id' => $user->id,
                 'otp' => $details['otp'],
-                'expires_at' => Carbon::now()->addMinutes(1),
+                'expires_at' => Carbon::now()->addMinutes(5),
             ]);
 
             Mail::to($user->email)->send(new UpdateProfileVerifyEmail($details));
@@ -212,6 +241,13 @@ class AuthController extends Controller
     public function logout()
     {
         try {
+            $loginActivity = LoginActivity::where('user_id', Auth::user()->id)
+                ->latest()
+                ->first();
+
+            if ($loginActivity) {
+                $loginActivity->update(["logout_time" => Carbon::now()]);
+            }
             auth()->guard('api')->logout();
             return response()->json([
                 'message' => 'User successfully signed out'
@@ -242,24 +278,75 @@ class AuthController extends Controller
     }
 
 
-    public function verify($token)
+    public function verify()
     {
         try {
-            $otp = Otp::where('token', $token)->first();
-            if (!$otp) {
+            $validator = Validator::make(request()->all(), [
+                'otp' => 'required',
+                'email' => 'required|string|email|max:255|unique:users,email',
+
+            ], [
+                'otp.required' => 'Please enter the OTP.',
+
+                'email.required' => 'Please enter your email address.',
+                'email.string' => 'The email must be a valid string.',
+                'email.email' => 'Please enter a valid email address.',
+                'email.max' => 'Email cannot exceed 255 characters.',
+                'email.unique' => 'you have already registered with this email address.',
+            ]);
+            if ($validator->fails()) {
                 return response()->json([
-                    'error' => 'Invalid token'
+                    'errors' => $validator->errors()
                 ], 400);
             }
 
-            $user = User::find($otp->user_id);
-            $user->email_verified_at = now();
-            $user->save();
+            $temp_user = TempUser::where('email', request()->email)->latest()->first();
 
-            $otp->delete();
+            if (!$temp_user) {
+                return response()->json([
+                    'error' => 'Invalid Username...'
+                ], 404);
+            }
+
+            $otp = Otp::where('otp', request()->otp)
+                ->where('user_id', $temp_user->id)
+                ->latest()
+                ->first();
+
+            if (!$otp) {
+                return response()->json([
+                    'error' => 'Invalid OTP'
+                ], 400);
+            }
+
+            if ($otp && $otp->expires_at && Carbon::now()->greaterThan($otp->expires_at)) {
+                return response()->json([
+                    'error' => 'OTP has expired'
+                ], 400);
+            }
+
+            Mail::send('mail.verify_register', ['user' => $temp_user], function ($message) use ($temp_user) {
+                $message->to($temp_user->email);
+                $message->subject('Verified Registration');
+            });
+
+
+            $user = new User();
+            $user->name = $temp_user->name;
+            $user->email = $temp_user->email;
+            $user->password = $temp_user->password;
+            $user->save();
+            $otpDel = Otp::where('user_id', $temp_user->id)->get();
+            foreach ($otpDel as $del) {
+                $del->delete();
+            }
+            $tempDel = TempUser::where('email', request()->email)->get();
+            foreach ($tempDel as $del) {
+                $del->delete();
+            }
             return response()->json([
-                'success' => 'User verified successfully'
-            ]);
+                'success' => 'your registration verification has been successful'
+            ], 200);
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 'Something went wrong: ' . $e->getMessage()
@@ -273,10 +360,10 @@ class AuthController extends Controller
         try {
             $validator = Validator::make(request()->all(), [
                 'otp' => 'required',
-                'user_id' => 'required',
+
             ], [
                 'otp.required' => 'Please enter the OTP.',
-                'user_id.required' => 'User ID is required.',
+
             ]);
             if ($validator->fails()) {
                 return response()->json([
@@ -284,7 +371,7 @@ class AuthController extends Controller
                 ], 400);
             }
 
-            $user = User::find(request()->user_id);
+            $user = User::find(Auth::user()->id);
             if (!$user) {
                 return response()->json([
                     'error' => 'Invalid Username...'
@@ -292,7 +379,7 @@ class AuthController extends Controller
             }
 
             $otp = Otp::where('otp', request()->otp)
-                ->where('user_id', request()->user_id)
+                ->where('user_id', Auth::user()->id)
                 ->latest()
                 ->first();
 
@@ -317,18 +404,17 @@ class AuthController extends Controller
 
             $user->name = $temp_user->name;
             $user->phone_number = $temp_user->phone_number;
+            $user->email = $temp_user->email;
             $user->pdf_file = $temp_user->pdf_file;
             $user->image = $temp_user->image;
             $user->save();
-            $otpDel= Otp::where('user_id', request()->user_id)->get();
-            foreach($otpDel as $del )
-            {
-                $del ->delete();
+            $otpDel = Otp::where('user_id', Auth::user()->id)->get();
+            foreach ($otpDel as $del) {
+                $del->delete();
             }
-            $tempDel= TempUser::where('user_id', request()->user_id)->get();
-            foreach($tempDel as $del )
-            {
-                $del ->delete();
+            $tempDel = TempUser::where('user_id', Auth::user()->id)->get();
+            foreach ($tempDel as $del) {
+                $del->delete();
             }
             return response()->json([
                 'success' => 'Your profile has been successfully updated'
@@ -368,17 +454,18 @@ class AuthController extends Controller
             }
 
 
-            $token = Hash::make($user);
+            $otp = rand(1111, 9999);
 
 
             DB::table('password_resets')->insert([
                 'email' => request()->email,
-                'token' => $token,
+                'otp' => $otp,
                 'created_at' => Carbon::now(),
+                'expires_at' => Carbon::now()->addMinutes(5),
             ]);
 
 
-            Mail::send('mail.password_reset', ['token' => $token], function ($message) use ($user) {
+            Mail::send('mail.password_reset', ['otp' => $otp, 'expires_at' => 5, 'user' => $user], function ($message) use ($user) {
                 $message->to($user->email);
                 $message->subject('Reset Password Request');
             });
@@ -400,6 +487,7 @@ class AuthController extends Controller
             $validator = Validator::make(request()->all(), [
                 'email' => 'required|email',
                 'password' => 'required|min:6',
+                'otp' => 'required',
             ]);
 
             if ($validator->fails()) {
@@ -418,7 +506,13 @@ class AuthController extends Controller
                 ->where('email', request()->email)->latest()
                 ->first();
 
-            if (request()->token != $passwordReset->token) {
+            if (Carbon::now()->greaterThan($passwordReset->expires_at)) {
+                return response()->json([
+                    'error' => 'OTP has expired'
+                ], 400);
+            }
+
+            if (request()->otp != $passwordReset->otp) {
                 return response()->json([
                     'message' => 'Invalid token'
                 ], 400);
@@ -457,7 +551,7 @@ class AuthController extends Controller
     public function getProfile(Request $request)
     {
         try {
-            $userGet =Auth::user();
+            $userGet = Auth::user();
 
             return response()->json([
                 'status' => 'success',
